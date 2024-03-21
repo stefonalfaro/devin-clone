@@ -24,7 +24,7 @@ use helpers::logger::HttpLogger;
 use helpers::config::{load_config, Config};
 use helpers::ai_tools::get_tools;
 use async_recursion::async_recursion;
-
+use std::process;
 use crate::models::openai_request::{Function, ToolChoice};
 
 //This custom error message is required for async recursion to ensure memory and thread safwety.
@@ -41,6 +41,11 @@ impl std::error::Error for MyError {}
 
 #[async_recursion]
 async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, config: &Config) -> Result<(), MyError> {
+    if messages.len() > config.max_iterations {
+        log::error!("Max iterations reached.");
+        return Ok(());
+    }
+
     // Create the request object
     let request_data = OpenAIRequest {
         model: config.model.clone(),
@@ -67,12 +72,10 @@ async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, 
     // Deserialize the JSON response
     let api_response: OpenAIResponse = from_str(body.as_str()).unwrap();
 
-    // Check if more than 2 functions, should only ever be 1
+    // Handle the Function
     if api_response.choices.len() > 1 {
         log::error!("AI called two functions instead of one. Using the first function.");
     }
-
-    // Handle the Function
     if let Some(first_choice) = api_response.choices.first() {
         if let Some(tool_calls) = &first_choice.message.tool_calls {
             for tool_call in tool_calls {
@@ -85,17 +88,6 @@ async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, 
                     log::error!("AI has finished working and said '{}'.", command);
                     return Ok(());
                 }
-
-                // if tool_call.function.name == "finished_working" {
-                //     // Break the recursive loop when the function name is 'finished_working'
-                //     log::error!("AI has finished working and said '{}'.", tool_call.function.arguments);
-                //     return Ok(());
-                // }
-                // if tool_call.function.name == "help_or_clarification" {
-                //     // Break the recursive loop when the function name is 'help_or_clarification'
-                //     log::error!("AI has a question '{}'.", tool_call.function.arguments);
-                //     return Ok(());
-                // }
 
                 match handle_function(&tool_call) {
                     Ok(output) => {
@@ -111,7 +103,7 @@ async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, 
                         // The user message will contain the response from the command.
                         messages.push(Message {
                             role: "user".to_string(),
-                            content: format!("Command executed. Output from CLI: {}. Please run the next command. Do not respond to the user, call the function.", output),
+                            content: format!("Command executed. Output from CLI: {}. Please run the next command. Check if you have completed your goal or not.", output),
                         });
 
                         // Recursively start this process all over again with the updated messages
@@ -135,6 +127,15 @@ async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, 
 
 #[tokio::main]
 async fn main() {
+    //Load the goal from the environment
+    let goal: String = match env::var("GOAL") {
+        Ok(val) => val,
+        Err(_) => {
+            eprintln!("Error: GOAL environment variable is not set.");
+            process::exit(1);
+        }
+    };
+
     //Configure the Environment and Logger
     let config_env: String = env::var("CONFIG_ENV").unwrap_or_else(|_| "default".to_string());
     if (config_env == "dev") || (config_env == "prod") { //Use BetterStack
@@ -154,7 +155,7 @@ async fn main() {
     let config = load_config().expect("Failed to load config");
 
     //Set the Goal
-    let goal: &str = "Create a new Rust project called devintest1. Make a function that prints 'hi devin' to the console. Run the binary to confirm the output is as it should be.";
+    //let goal: &str = "Create a new Rust project called devintest1. Make a function that prints 'hi devin' to the console. Run the binary to confirm the output is as it should be.";
     log::warn!("Goal: {}", &goal);
 
     //Create the System Message and set the Goal

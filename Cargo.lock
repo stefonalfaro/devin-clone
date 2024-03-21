@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "devin-clone"
-version = "0.1.1"
+version = "1.0.2"
 dependencies = [
  "async-recursion",
  "chrono",
@@ -488,10 +488,6 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
-
-[[package]]
-name = "devintest1"
-version = "0.1.0"
 
 [[package]]
 name = "dtoa"

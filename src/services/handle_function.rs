@@ -11,7 +11,7 @@ pub fn handle_function(tool_call: &ToolCall) -> Result<String, MyError> {
         if let Some(command) = args["command"].as_str() {
             // Execute the command
             let output = Command::new("sh")
-                .current_dir("./output")
+                .current_dir("/output") //./output when local
                 .arg("-c")
                 .arg(command)
                 .output().unwrap();
