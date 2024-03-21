@@ -1,3 +1,5 @@
+The software described is an advanced automated system that integrates artificial intelligence to process and execute system commands within a controlled environment, aiming to accomplish specific goals. It uses asynchronous programming techniques, notably async recursion, to manage and handle tasks efficiently. 
+
 ## Purpose and High-Level Functionality
 At a high level, this software automates the execution of system commands to achieve predefined goals. It leverages AI to parse and understand tasks, then translates these into executable commands. This process involves:
 
