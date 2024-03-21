@@ -12,7 +12,7 @@ Create a `config.json` file in a known directory on your host system. This file 
 ```json
 {
     "version": "1.0.0",
-    "openai_api_url": [https://api.openai.com](https://api.openai.com/v1/chat/completions",
+    "openai_api_url": "https://api.openai.com/v1/chat/completions",
     "openai_api_key": "your_openai_api_key_here",
     "model": "gpt-3.5-turbo"
 }
