@@ -1,5 +1,10 @@
 The software described is an advanced automated system that integrates artificial intelligence to process and execute system commands within a controlled environment, aiming to accomplish specific goals. It uses asynchronous programming techniques, notably async recursion, to manage and handle tasks efficiently. 
 
+## Building the Docker virtualized developer environment
+```
+ sudo docker build -t devin-clone .
+```
+
 ## Configuration File
 
 Create a `config.json` file in a known directory on your host system. This file should contain the following structure:
@@ -7,13 +12,13 @@ Create a `config.json` file in a known directory on your host system. This file 
 ```json
 {
     "version": "1.0.0",
-    "openai_api_url": "https://api.openai.com",
+    "openai_api_url": [https://api.openai.com](https://api.openai.com/v1/chat/completions",
     "openai_api_key": "your_openai_api_key_here",
-    "model": "text-davinci-003"
+    "model": "gpt-3.5-turbo"
 }
 ```
 
-Replace `your_openai_api_key_here` with your actual OpenAI API key. Adjust the `version` and `model` as needed for your specific requirements.
+Replace `your_openai_api_key_here` with your actual OpenAI API key.
 
 ## Running the Container
 
