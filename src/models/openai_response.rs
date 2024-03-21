@@ -11,7 +11,7 @@ pub struct OpenAIResponse {
     pub model: String,
     pub choices: Vec<Choice>,
     pub usage: Usage,
-    pub system_fingerprint: String,
+    pub system_fingerprint: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

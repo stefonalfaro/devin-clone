@@ -8,6 +8,7 @@ pub struct OpenAIRequest {
     pub model: String,
     pub messages: Vec<Message>,
     pub tools: Vec<Tool>,
+    pub tool_choice: ToolChoice
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -36,4 +37,16 @@ pub struct Parameters {
     pub param_type: String,
     pub properties: Value,
     pub required: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ToolChoice {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: Function,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Function {
+    pub name: String,
 }

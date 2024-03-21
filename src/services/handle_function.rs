@@ -1,37 +1,37 @@
 use serde_json::Value;
 use std::process::Command;
-use std::error::Error;
-
 use crate::models::openai_response::ToolCall;
+use crate::MyError;
 
-pub fn handle_function(tool_call: &ToolCall) -> Result<String, Box<dyn Error>> {
+pub fn handle_function(tool_call: &ToolCall) -> Result<String, MyError> {
     if tool_call.function.name == "command_line" 
     {
         // Parse the arguments JSON string
-        let args: Value = serde_json::from_str(&tool_call.function.arguments)?;
+        let args: Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
         if let Some(command) = args["command"].as_str() {
             // Execute the command
             let output = Command::new("sh")
+                .current_dir("./output")
                 .arg("-c")
                 .arg(command)
-                .output()?;
+                .output().unwrap();
 
             if output.status.success() {
-                let output_str = String::from_utf8(output.stdout)?;
+                let output_str = String::from_utf8(output.stdout).unwrap();
                 Ok(output_str)
             } else {
-                let error_str = String::from_utf8(output.stderr)?;
-                Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, error_str)))
+                let error_str = String::from_utf8(output.stderr).unwrap();
+                Ok(error_str) //Make sure to return the Err as an Ok so the AI can read the response. This isn't a real error.
             }
         } else {
-            Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Command not found")))
+            return Err(MyError { message: "Command not found".to_string() });
         }
     }
     else if tool_call.function.name == "finished_working"
     {
-        Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "finished_working is not implemented yet.")))
+        return Err(MyError { message: "finished_working is not implemented yet.".to_string() });
     }
     else {
-        Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Tool call is not 'command_line'")))
+        return Err(MyError { message: "Tool call is not 'command_line'".to_string() });
     }
 }

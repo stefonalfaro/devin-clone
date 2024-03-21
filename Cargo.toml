@@ -1,3 +1,4 @@
+workspace = { members = ["output/devintest1"] }
 [package]
 name = "devin-clone"
 version = "0.1.1"
@@ -13,3 +14,4 @@ log = "0.4"
 chrono = "0.4"
 lazy_static = "1.4.0"
 env_logger = "0.9"
+async-recursion = "1.0"

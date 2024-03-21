@@ -1,6 +1,7 @@
 extern crate lazy_static;
-use serde_json::{from_str, json};
-use std::{env, fs};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use serde_json::{from_str, Value};
+use std::env;
 use log::LevelFilter;
 mod services {
     pub mod handle_function;
@@ -20,11 +21,120 @@ mod helpers {
 }
 use helpers::create_system_message::create_system_message;
 use helpers::logger::HttpLogger;
-use helpers::config::load_config;
+use helpers::config::{load_config, Config};
 use helpers::ai_tools::get_tools;
+use async_recursion::async_recursion;
+
+use crate::models::openai_request::{Function, ToolChoice};
+
+//This custom error message is required for async recursion to ensure memory and thread safwety.
+#[derive(Debug)]
+struct MyError {
+    message: String,
+}
+impl std::fmt::Display for MyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+impl std::error::Error for MyError {}
+
+#[async_recursion]
+async fn process_request(messages: &mut Vec<Message>, client: &reqwest::Client, config: &Config) -> Result<(), MyError> {
+    // Create the request object
+    let request_data = OpenAIRequest {
+        model: config.model.clone(),
+        messages: messages.clone(),
+        tools: get_tools(),
+        tool_choice: ToolChoice {
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "command_line".to_string(),
+            },
+        },
+    };
+
+    // Setup headers
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert("Authorization", format!("Bearer {}", config.openai_api_key).parse().unwrap());
+
+    // Send the request and get the response
+    let request = client.post(&config.openai_api_url).headers(headers).json(&request_data);
+    let response = request.send().await.unwrap();
+    let body = response.text().await.unwrap();
+
+    // Deserialize the JSON response
+    let api_response: OpenAIResponse = from_str(body.as_str()).unwrap();
+
+    // Check if more than 2 functions, should only ever be 1
+    if api_response.choices.len() > 1 {
+        log::error!("AI called two functions instead of one. Using the first function.");
+    }
+
+    // Handle the Function
+    if let Some(first_choice) = api_response.choices.first() {
+        if let Some(tool_calls) = &first_choice.message.tool_calls {
+            for tool_call in tool_calls {
+                //Log the Command
+                let args: Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+                if let Some(command) = args["command"].as_str() {
+                    log::warn!("[Command {}] {}", messages.len() - 1, command);
+                } //Handle the finish working case
+                else if let Some(command) = args["finished_working"].as_str() {
+                    log::error!("AI has finished working and said '{}'.", command);
+                    return Ok(());
+                }
+
+                // if tool_call.function.name == "finished_working" {
+                //     // Break the recursive loop when the function name is 'finished_working'
+                //     log::error!("AI has finished working and said '{}'.", tool_call.function.arguments);
+                //     return Ok(());
+                // }
+                // if tool_call.function.name == "help_or_clarification" {
+                //     // Break the recursive loop when the function name is 'help_or_clarification'
+                //     log::error!("AI has a question '{}'.", tool_call.function.arguments);
+                //     return Ok(());
+                // }
+
+                match handle_function(&tool_call) {
+                    Ok(output) => {
+                        //Log the output
+                        log::warn!("[Output {}] {}", messages.len() - 1, output);
+
+                        //The assistant message will contain a history of the actions
+                        messages.push(Message {
+                            role: "assistant".to_string(),
+                            content: format!("Function Name: {}, Arguments: {}", tool_call.function.name, tool_call.function.arguments),
+                        });
+
+                        // The user message will contain the response from the command.
+                        messages.push(Message {
+                            role: "user".to_string(),
+                            content: format!("Command executed. Output from CLI: {}. Please run the next command. Do not respond to the user, call the function.", output),
+                        });
+
+                        // Recursively start this process all over again with the updated messages
+                        return process_request(messages, client, config).await;
+                    },
+                    Err(e) => {
+                        log::error!("Error executing command: {}", e);
+                        return Err(MyError { message: e.to_string() });
+                    }
+                }
+            }
+        } else {
+            log::error!("No tool calls for this choice.");
+        }
+    } else {
+        log::error!("No choices available.");
+    }
+
+    Ok(())
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     //Configure the Environment and Logger
     let config_env: String = env::var("CONFIG_ENV").unwrap_or_else(|_| "default".to_string());
     if (config_env == "dev") || (config_env == "prod") { //Use BetterStack
@@ -44,12 +154,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = load_config().expect("Failed to load config");
 
     //Set the Goal
-    let goal: &str = "Create a new Rust project called devintest1.";
+    let goal: &str = "Create a new Rust project called devintest1. Make a function that prints 'hi devin' to the console. Run the binary to confirm the output is as it should be.";
     log::warn!("Goal: {}", &goal);
 
-    //Create the System Message and set the history of actions list
-    let mut history_of_actions:Vec<String> = vec![];
-    let system_message = create_system_message(&history_of_actions);
+    //Create the System Message and set the Goal
+    let system_message = create_system_message(goal.to_string());
     //log::warn!("System Message: {}", &system_message);
 
     let mut messages: Vec<Message> =  vec![
@@ -64,74 +173,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     //Create the HTTP Client
-    let client = reqwest::Client::builder().build()?;
+    let client = reqwest::Client::builder().build().unwrap();
 
     //Set the Authorization Headers
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("Authorization", format!("Bearer {}",config.openai_api_key).parse()?);
-    headers.insert("Content-Type", "application/json".parse()?);
+    headers.insert("Authorization", format!("Bearer {}",config.openai_api_key).parse().unwrap());
+    headers.insert("Content-Type", "application/json".parse().unwrap());
 
     //This is the main logic loop that we need to implement recursion to. We would break the loop when the tool_call.function.name of 'finished_working' is called.
-    //The idea is that we would generate a new system message includes the history, and then set the response from the last command to the user message.
-
-    //Create the request object
-    let request_data = OpenAIRequest {
-        model: config.model,
-        messages: messages.clone(),
-        tools: get_tools()
-    };
-
-    //Send the request and get the response
-    let request: reqwest::RequestBuilder = client.request(reqwest::Method::POST, &config.openai_api_url).headers(headers).json(&request_data);
-    let response: reqwest::Response = request.send().await?;
-    let body: String = response.text().await?;
-
-    // Deserialize the JSON response
-    let api_response: OpenAIResponse = from_str(&body)?;
-
-    //Check if more than 2 functions, should only ever be 1.
-    if api_response.choices.len() > 1 {
-       log::error!("AI called two fun tions instead of one. Using the first function.");
+    if let Err(e) = process_request(&mut messages, &client, &config).await {
+        log::error!("An error occurred: {}", e);
     }
 
-    //Handle the Function
-    if let Some(first_choice) = api_response.choices.first() {
-        if let Some(tool_calls) = &first_choice.message.tool_calls {
-            for tool_call in tool_calls {
-                log::warn!("Function Name: {}, Arguments: {}", tool_call.function.name,  tool_call.function.arguments);
-
-                match handle_function(&tool_call) {
-                    Ok(output) => {
-                        log::warn!("Command {} executed successfully. Output: {}", history_of_actions.len() + 1, output);
-
-                        //We need to add the name and arguements to the history of the system message.
-                        //history_of_actions.push(format!("{}: {} {}", history_of_actions.len() + 1, tool_call.function.name, tool_call.function.arguments));
-
-                        //Instead of the history of actions we may also use the assistant response to log the command they choose to run.
-                        messages.push(Message {
-                            role: "assisstant".to_string(),
-                            content: goal.to_string(),
-                        });
-
-                        //The output of the command can go into the user message
-                        messages.push(Message {
-                            role: "user".to_string(),
-                            content: format!("The command output was: {}", output.to_string()),
-                        });
-
-                        //We would now need to recursively start this process all over again. We would need to generate a new system message since the history of actions changed. We would need to pass the console output into the User message to let the AI know the console response.
-                    },
-                    Err(e) => {
-                        log::error!("Error executing command: {}", e);
-                    }
-                }
-            }
-        } else {
-            log::error!("No tool calls for this choice.");
-        }
-    } else {
-        log::error!("No choices available.");
-    }
-
-    Ok(())
+    log::error!("Devin is shutting down.");
 }

@@ -42,6 +42,9 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/ma
 # Set working directory
 WORKDIR /app
 
+# Create the /output directory
+RUN mkdir /output
+
 # Copy the source code of your Rust application into the container
 COPY . .
 
